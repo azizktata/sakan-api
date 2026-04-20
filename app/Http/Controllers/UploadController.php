@@ -17,10 +17,10 @@ class UploadController extends Controller
 
         $file      = $request->file('image');
         $filename  = Str::uuid() . '.' . $file->getClientOriginalExtension();
-        $path      = $file->storeAs('properties', $filename, 'public');
+        $path = $file->storeAs('properties', $filename, 'uploads');
 
         return response()->json([
-            'url' => Storage::disk('public')->url($path),
+            'url' => Storage::disk('uploads')->url($path),
         ], 201);
     }
 }
