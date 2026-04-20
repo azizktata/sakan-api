@@ -35,7 +35,7 @@ class SocialAuthController extends Controller
         $user->tokens()->where('name', 'sakan-web')->delete();
         $token = $user->createToken('sakan-web')->plainTextToken;
 
-        return redirect(env('FRONTEND_URL') . '/auth/callback')
-            ->withCookie(cookie('sakan_token', $token, 60 * 24 * 30, '/', null, true, true, false, 'strict'));
+        return redirect()->away(env('FRONTEND_URL') . '/auth/callback')
+            ->withCookie(cookie('sakan_token', $token, 60 * 24 * 30, '/', null, true, true, false, 'none'));
     }
 }
