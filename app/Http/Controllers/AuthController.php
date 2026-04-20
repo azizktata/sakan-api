@@ -72,7 +72,7 @@ class AuthController extends Controller
                 true,
                 true,
                 false,
-                'strict'
+                'none'
             ));
     }
 }
