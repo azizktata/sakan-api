@@ -7,7 +7,7 @@ return [
 
     'allowed_origins' => [
         'http://localhost:3000',
-        'https://sakan.tn',
+        'https://sakan1.netlify.app/',
     ],
 
     'allowed_origins_patterns' => [],
