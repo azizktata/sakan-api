@@ -2,13 +2,19 @@
 
 use App\Http\Controllers\Admin\AdminPropertyController;
 use App\Http\Controllers\Admin\AdminUserController;
+use App\Http\Controllers\AmenityController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\ContactController;
+use App\Http\Controllers\LocationController;
 use App\Http\Controllers\PropertyController;
 use App\Http\Controllers\SocialAuthController;
 use App\Http\Controllers\UploadController;
 use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Route;
+
+// Reference data (public)
+Route::get('locations', [LocationController::class, 'index']);
+Route::get('amenities', [AmenityController::class, 'index']);
 
 // Auth
 Route::prefix('auth')->group(function () {
@@ -39,7 +45,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::patch('user/contacts/{id}/read', [ContactController::class, 'markRead']);
     Route::patch('user/me',       [UserController::class, 'update']);
 
-    Route::get('upload/presign',  [UploadController::class, 'presign']);
+    Route::post('upload/image', [UploadController::class, 'upload']);
 });
 
 // Admin

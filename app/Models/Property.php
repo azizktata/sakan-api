@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 
 class Property extends Model
@@ -56,5 +57,19 @@ class Property extends Model
     public function contacts()
     {
         return $this->hasMany(Contact::class);
+    }
+
+    protected function latitude(): Attribute
+    {
+        return Attribute::get(
+            fn ($value) => $value ?? $this->location?->latitude
+        );
+    }
+
+    protected function longitude(): Attribute
+    {
+        return Attribute::get(
+            fn ($value) => $value ?? $this->location?->longitude
+        );
     }
 }

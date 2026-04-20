@@ -29,6 +29,17 @@ class PropertyController extends Controller
         if ($request->filled('max_price')) {
             $query->where('price', '<=', $request->max_price);
         }
+        if ($request->filled('bedrooms')) {
+            $query->where('bedrooms', $request->integer('bedrooms'));
+        }
+        if ($request->filled('amenities')) {
+            $ids = array_filter(explode(',', $request->amenities));
+            if (! empty($ids)) {
+                foreach ($ids as $amenityId) {
+                    $query->whereHas('amenities', fn ($q) => $q->where('amenities.id', $amenityId));
+                }
+            }
+        }
 
         return response()->json($query->latest()->paginate(20));
     }
