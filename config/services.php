@@ -41,4 +41,8 @@ return [
         'redirect' => env('GOOGLE_REDIRECT_URI'),
     ],
 
+    'ml' => [
+        'url' => env('ML_SERVICE_URL', 'http://localhost:8001'),
+    ],
+
 ];

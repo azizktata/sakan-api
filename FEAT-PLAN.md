@@ -1,12 +1,10 @@
 # SAKAN project
 
-
 SAKAN — سكن · Project Reference
 
 > Plateforme immobilière éthique & halal — Tunisie
 >
 > Stack: Next.js · Tailwind · Laravel · MySQL
->
 
 ## Architecture Overview
 
@@ -27,12 +25,10 @@ Next.js (web)          Mobile app (future)
 
 ```
 
-
 4. **Fonctionnalités Clés :**
    * **Espace Client :** Dashboard "Pro-level" avec gestion des annonces.
    * **Dépôt d'annonce :** Flow simplifié avec barre de progression.
    * **Espace Admin :** Modération et statistiques.
-
 
 ## Stack
 
@@ -45,7 +41,7 @@ Next.js (web)          Mobile app (future)
 | Laravel Socialite   | Google OAuth (consommateur, pas fournisseur) |
 | PostgreSQL OR MySQL | Base de données principale                  |
 |                     |                                              |
-| Cloudflare R2       | Stockage images (S3-compatible)              |
+|                     |                                              |
 
 ### Frontend
 
@@ -54,8 +50,6 @@ Next.js (web)          Mobile app (future)
 | Next.js (App Router) | UI web                                  |
 | axios                | Appels API HTTP                         |
 | Gestion token        | httpOnly cookies — jamais localStorage |
-
-
 
 ## Gestion des tokens — Stratégie retenue
 
@@ -89,14 +83,11 @@ Browser              Next.js                      Laravel API
 > Pas besoin de refresh token séparé pour le web — le token est révoqué au logout.
 >
 > Pour la **mobile app future** : les tokens seront émis et stockés côté app native (pas de cookie).
->
 
 SAKAN a besoin de :
 
 * Émettre des tokens pour ses propres clients (web + mobile)
 * Consommer Google OAuth pour ses propres users (via Socialite — indépendant du choix Sanctum/Passport)
-
-
 
 ## Laravel — Routes API (`routes/api.php`)
 
@@ -321,8 +312,6 @@ Enregistré dans `bootstrap/app.php` :
 | `agent`       | Idem + badge "Agent" visible sur ses annonces |
 | `admin`       | Tout + panel `/admin`                       |
 
-
-
 CORS (`config/cors.php`)
 
 ```php
@@ -334,11 +323,3 @@ CORS (`config/cors.php`)
 ```
 
 ---
-
-## Upload images — Flow R2
-
-1. User dépose des fichiers → compression `browser-image-compression` (max 1600px, WebP)
-2. `GET /api/upload/presign?filename=...&contentType=image/webp` → `{ signedUrl, publicUrl }`
-3. `PUT` fichier compressé directement vers R2 via `signedUrl` — browser → R2, sans passer par Laravel
-4. Sauvegarder `publicUrl` dans le form state du wizard
-5. À la soumission : tableau `images` avec les `publicUrl` envoyé dans `POST /api/properties`

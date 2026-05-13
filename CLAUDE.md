@@ -42,24 +42,57 @@ Authentication uses **Laravel Sanctum** with API tokens stored in httpOnly cooki
 - Roles: `particulier` (individual), `agent` (real estate agent), `admin`
 - Role middleware protects admin routes
 
-### Database (11 migrations)
+### Database (20 migrations)
 Key domain tables:
 - **users** — extended with `google_id`, `provider`, `avatar`, `phone`, `role`
-- **locations** — self-referencing (`parent_id`) for geographic hierarchy
+- **locations** — self-referencing (`parent_id`) for geographic hierarchy; `zone_score TINYINT` (1–5, 5=premium), `neighborhoods JSON` (array of strings); 131 rows (24 governorates + 107 cities)
 - **properties** — listings with `transaction_type` (sale/rent), `status` (draft/published/sold/rented), `property_type`, geo coordinates, `location_id`
 - **property_images** — references Cloudflare R2 URLs
 - **amenities** + **property_amenities** — junction table
 - **contacts** — buyer/renter inquiries
+- **estimation_logs** — ML estimation requests; extended with `estimation_id` (UUID), `user_opinion` (too_high/correct/too_low), `feedback_at`
+
+Analytics tables (Phase 1 Data Intelligence Platform):
+- **property_views** — raw view events with `visitor_key`, `session_bucket`, `unique_key` (SHA-256, UNIQUE), `source`, `device`, `ip_hash`; Phase 2 additions: `view_id` (char 36, UUID returned to client), `country`, `city_geo` (from GeoIP), `duration_seconds`
+- **property_stats_daily** — daily aggregates per property: `views_total`, `views_unique`, `contacts_count`, `conversion_rate`; unique on `(property_id, date)`
+- **city_stats_daily** — daily aggregates per location: `views_total`, `properties_published`, `contacts_count`, `demand_supply_ratio`; unique on `(location_id, date)`
+
+Analytics tables (Phase 2 Data Intelligence Platform):
+- **user_sessions** — session lifecycle tracking; unique `session_token`; `visitor_key`, `device`, `started_at`, `last_seen_at`, `ended_at`, `duration_seconds`
+- **visitor_identities** — anonymous-to-authenticated stitching; unique `(visitor_key, user_id)`
+- **searches** — search event log; unique `search_id`; `filters` JSON; `location_id` extracted for indexing
+- **market_insights_daily** — per-location daily market KPIs; unique `(location_id, date)`
 
 ### Image Storage
-Images are uploaded to **Cloudflare R2** (S3-compatible). Flow: client compresses → Laravel generates presigned URL → client uploads directly to R2.
+Images are uploaded via `POST /api/upload/image` — Laravel stores them server-side. Cloudflare R2 presigned upload is in `FEAT-PLAN.md` (spec only, not implemented).
 
-### Controllers to Implement (see FEAT-PLAN.md)
-- `AuthController` — register, login, logout, me
+### Controllers
+- `AuthController` — register, login, logout, me; Phase 2: identity stitching in `login()` and `register()` (links visitor_key to user_id in `visitor_identities`)
 - `SocialAuthController` — Google OAuth
 - `PropertyController` — CRUD, filtered listing
 - `ContactController` — inquiries
 - `AdminPropertyController` / `AdminUserController` — moderation
+- `EstimationController` — ML price estimation + `feedback()` method for user opinion (too_high/correct/too_low)
+- `AnalyticsController` — `trackView()`, `propertyStats()`, `propertyTrend()`, `ownerSummary()` (owner-facing); Phase 2: `updateDuration()` (PATCH view duration), `trackSearch()` (search event logging)
+- `SessionController` — Phase 2: `start()`, `ping()`, `end()` (session lifecycle, public routes)
+- `Admin\AdminAnalyticsController` — `overview()`, `topProperties()`, `topCities()`, `conversionFunnel()`, `estimationDataset()` (admin-only); Phase 2: `marketInsights()`, `searchTrends()`, `sessions()`, `geoBreakdown()`
+
+### Scheduled Commands
+- `analytics:aggregate` — runs daily at 00:05; aggregates yesterday's `property_views` into `property_stats_daily` and `city_stats_daily`. Idempotent (uses UPSERT). Register via `routes/console.php`.
+- `analytics:aggregate-market` — runs daily at 00:15 (after `analytics:aggregate`); aggregates `searches` + `property_views` + `properties` into `market_insights_daily`. Idempotent (uses UPSERT).
+
+## GeoIP Setup (Phase 2)
+
+Uses `geoip2/geoip2` PHP package with a local MaxMind GeoLite2-City database.
+
+File location: `storage/geoip/GeoLite2-City.mmdb` (git-ignored, ~60MB)
+
+Download steps:
+1. Create a free account at maxmind.com
+2. My Account → Download Files → GeoLite2 City → Download GZIP
+3. Extract and place GeoLite2-City.mmdb at storage/geoip/GeoLite2-City.mmdb
+
+If file is missing, GeoIpService returns null for country/city — tracking still works, geo fields are null.
 
 ## Key Files
 
