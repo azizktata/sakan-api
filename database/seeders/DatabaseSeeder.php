@@ -12,6 +12,7 @@ class DatabaseSeeder extends Seeder
             LocationSeeder::class,  // locations avant properties (FK)
             AmenitySeeder::class,
             AdminSeeder::class,
+            PropertySeeder::class,
         ]);
     }
 }

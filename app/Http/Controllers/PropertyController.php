@@ -29,6 +29,12 @@ class PropertyController extends Controller
         if ($request->filled('max_price')) {
             $query->where('price', '<=', $request->max_price);
         }
+        if ($request->filled('min_surface')) {
+            $query->where('surface', '>=', $request->integer('min_surface'));
+        }
+        if ($request->filled('max_surface')) {
+            $query->where('surface', '<=', $request->integer('max_surface'));
+        }
         if ($request->filled('bedrooms')) {
             $query->where('bedrooms', $request->integer('bedrooms'));
         }
@@ -41,7 +47,9 @@ class PropertyController extends Controller
             }
         }
 
-        return response()->json($query->latest()->paginate(20));
+        $perPage = min((int) ($request->per_page ?? 20), 500);
+
+        return response()->json($query->latest()->paginate($perPage));
     }
 
     public function show(int $id): JsonResponse
