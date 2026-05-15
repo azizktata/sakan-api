@@ -50,19 +50,23 @@ foreach ($images as $img) {
         continue;
     }
 
-    // Download
-    $ctx = stream_context_create([
-        'http' => [
-            'timeout'       => 15,
-            'user_agent'    => 'Mozilla/5.0 (compatible; SAKAN/1.0)',
-            'ignore_errors' => true,
-        ],
-        'ssl' => ['verify_peer' => false],
+    // Download via cURL
+    $ch = curl_init($sourceUrl);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_TIMEOUT        => 20,
+        CURLOPT_USERAGENT      => 'Mozilla/5.0 (compatible; SAKAN/1.0)',
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYHOST => false,
     ]);
+    $bytes = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlErr  = curl_error($ch);
+    curl_close($ch);
 
-    $bytes = @file_get_contents($sourceUrl, false, $ctx);
-    if ($bytes === false || strlen($bytes) < 1000) {
-        echo "  FAIL  #{$img->id}  {$sourceUrl}" . PHP_EOL;
+    if ($bytes === false || strlen($bytes) < 1000 || $httpCode >= 400) {
+        echo "  FAIL  #{$img->id}  HTTP {$httpCode}  {$curlErr}  {$sourceUrl}" . PHP_EOL;
         $fail++;
         continue;
     }
