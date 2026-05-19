@@ -64,7 +64,7 @@ class EstimationController extends Controller
         $mlUrl = rtrim(config('services.ml.url', 'http://localhost:8001'), '/');
 
         try {
-            $response = Http::timeout(2)
+            $response = Http::timeout(6)
                 ->post("{$mlUrl}/predict", $payload);
 
             if ($response->successful()) {
