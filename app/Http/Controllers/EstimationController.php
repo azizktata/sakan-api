@@ -22,6 +22,8 @@ class EstimationController extends Controller
             'transaction_type' => 'required|string|in:' . implode(',', self::VALID_TRANSACTION_TYPES),
             'surface'          => 'required|numeric|min:20|max:50000',
             'bedrooms'         => 'sometimes|integer|min:0|max:20',
+            'bathrooms'        => 'sometimes|nullable|integer|min:0|max:10',
+            'floor'            => 'sometimes|nullable|integer|min:0|max:30',
             'condition'        => 'sometimes|string|in:' . implode(',', self::VALID_CONDITIONS),
             'zone_score'       => 'sometimes|integer|min:1|max:5',
             'amenities_count'  => 'sometimes|integer|min:0|max:10',
@@ -31,6 +33,8 @@ class EstimationController extends Controller
             'parking_spaces'   => 'sometimes|nullable|integer|min:0|max:20',
             'terrace_surface'  => 'sometimes|nullable|numeric|min:0|max:2000',
             'building_age'     => 'sometimes|nullable|integer|min:0|max:150',
+            'latitude'         => 'sometimes|nullable|numeric|between:-90,90',
+            'longitude'        => 'sometimes|nullable|numeric|between:-180,180',
         ]);
 
         $estimationId = (string) Str::uuid();
@@ -42,6 +46,8 @@ class EstimationController extends Controller
             'transaction_type' => $data['transaction_type'],
             'surface'          => (float) $data['surface'],
             'bedrooms'         => (int) ($data['bedrooms'] ?? 2),
+            'bathrooms'        => isset($data['bathrooms']) ? (int)   $data['bathrooms'] : null,
+            'floor'            => isset($data['floor'])     ? (int)   $data['floor']     : null,
             'condition'        => $data['condition'] ?? 'bon_etat',
             'zone_score'       => (int) ($data['zone_score'] ?? 3),
             'amenities_count'  => (int) ($data['amenities_count'] ?? 0),
@@ -51,6 +57,8 @@ class EstimationController extends Controller
             'parking_spaces'   => isset($data['parking_spaces'])  ? (int)   $data['parking_spaces']  : null,
             'terrace_surface'  => isset($data['terrace_surface']) ? (float) $data['terrace_surface'] : null,
             'building_age'     => isset($data['building_age'])    ? (int)   $data['building_age']    : null,
+            'latitude'         => isset($data['latitude'])        ? (float) $data['latitude']        : null,
+            'longitude'        => isset($data['longitude'])       ? (float) $data['longitude']       : null,
         ];
 
         $mlUrl = rtrim(config('services.ml.url', 'http://localhost:8001'), '/');
