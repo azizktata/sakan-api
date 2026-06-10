@@ -61,20 +61,48 @@ class AdminAnalyticsController extends Controller
 
     public function topCities(): JsonResponse
     {
-        $rows = DB::table('city_stats_daily as cs')
-            ->join('locations as l', 'cs.location_id', '=', 'l.id')
-            ->where('cs.date', '>=', now()->subDays(30)->toDateString())
+        $since30 = now()->subDays(30)->startOfDay();
+
+        $rows = DB::table('property_views as pv')
+            ->join('properties as p', 'pv.property_id', '=', 'p.id')
+            ->join('locations as l', 'p.location_id', '=', 'l.id')
+            ->where('pv.created_at', '>=', $since30)
             ->select('l.id', 'l.name', 'l.slug')
-            ->selectRaw('SUM(cs.views_total) as views_total')
-            ->selectRaw('SUM(cs.contacts_count) as contacts_count')
-            ->selectRaw('MAX(cs.properties_published) as properties_published')
-            ->selectRaw('CASE WHEN MAX(cs.properties_published) > 0
-                              THEN ROUND(SUM(cs.views_total) / MAX(cs.properties_published), 2)
-                              ELSE 0 END as demand_supply_ratio')
+            ->selectRaw('COUNT(pv.id) as views_total')
+            ->selectRaw('COUNT(DISTINCT pv.visitor_key) as views_unique')
             ->groupBy('l.id', 'l.name', 'l.slug')
             ->orderByDesc('views_total')
             ->limit(20)
             ->get();
+
+        // Enrich with contacts + published count from live tables
+        $locationIds = $rows->pluck('id');
+
+        $contactCounts = DB::table('contacts as c')
+            ->join('properties as p', 'c.property_id', '=', 'p.id')
+            ->whereIn('p.location_id', $locationIds)
+            ->where('c.created_at', '>=', $since30)
+            ->select('p.location_id')
+            ->selectRaw('COUNT(*) as cnt')
+            ->groupBy('p.location_id')
+            ->pluck('cnt', 'p.location_id');
+
+        $publishedCounts = DB::table('properties')
+            ->whereIn('location_id', $locationIds)
+            ->where('status', 'published')
+            ->select('location_id')
+            ->selectRaw('COUNT(*) as cnt')
+            ->groupBy('location_id')
+            ->pluck('cnt', 'location_id');
+
+        $rows = $rows->map(function ($row) use ($contactCounts, $publishedCounts) {
+            $row->contacts_count       = (int) ($contactCounts[$row->id] ?? 0);
+            $row->properties_published = (int) ($publishedCounts[$row->id] ?? 0);
+            $row->demand_supply_ratio  = $row->properties_published > 0
+                ? round($row->views_total / $row->properties_published, 2)
+                : 0;
+            return $row;
+        });
 
         return response()->json($rows);
     }
@@ -133,23 +161,80 @@ class AdminAnalyticsController extends Controller
 
     public function marketInsights(): JsonResponse
     {
-        $rows = DB::table('market_insights_daily as m')
-            ->join('locations as l', 'm.location_id', '=', 'l.id')
-            ->where('m.date', '>=', now()->subDays(30)->toDateString())
-            ->select('l.id', 'l.name', 'l.slug')
-            ->selectRaw('SUM(m.searches_count) as searches_count')
-            ->selectRaw('SUM(m.searches_zero_results) as searches_zero_results')
-            ->selectRaw('SUM(m.views_total) as views_total')
-            ->selectRaw('MAX(m.properties_published) as properties_published')
-            ->selectRaw('AVG(m.avg_price) as avg_price')
-            ->selectRaw('AVG(m.demand_index) as demand_index')
-            ->selectRaw('AVG(m.attractiveness_score) as attractiveness_score')
-            ->selectRaw('AVG(m.liquidity_index) as liquidity_index')
-            ->selectRaw('AVG(m.search_gap_index) as search_gap_index')
-            ->groupBy('l.id', 'l.name', 'l.slug')
-            ->orderByDesc('demand_index')
-            ->limit(20)
-            ->get();
+        $since30 = now()->subDays(30)->startOfDay();
+
+        // Build live market insights from raw tables — no cron dependency
+        $viewsByLocation = DB::table('property_views as pv')
+            ->join('properties as p', 'pv.property_id', '=', 'p.id')
+            ->where('pv.created_at', '>=', $since30)
+            ->whereNotNull('p.location_id')
+            ->select('p.location_id')
+            ->selectRaw('COUNT(pv.id) as views_total')
+            ->groupBy('p.location_id')
+            ->pluck('views_total', 'p.location_id');
+
+        $searchesByLocation = DB::table('searches')
+            ->where('created_at', '>=', $since30)
+            ->whereNotNull('location_id')
+            ->select('location_id')
+            ->selectRaw('COUNT(*) as searches_count')
+            ->selectRaw('SUM(CASE WHEN results_count = 0 THEN 1 ELSE 0 END) as searches_zero_results')
+            ->groupBy('location_id')
+            ->get()
+            ->keyBy('location_id');
+
+        $publishedByLocation = DB::table('properties')
+            ->where('status', 'published')
+            ->whereNotNull('location_id')
+            ->select('location_id')
+            ->selectRaw('COUNT(*) as cnt')
+            ->selectRaw('AVG(price) as avg_price')
+            ->groupBy('location_id')
+            ->get()
+            ->keyBy('location_id');
+
+        $locationIds = collect($viewsByLocation->keys())
+            ->merge($searchesByLocation->keys())
+            ->unique();
+
+        $locations = DB::table('locations')
+            ->whereIn('id', $locationIds)
+            ->get(['id', 'name', 'slug'])
+            ->keyBy('id');
+
+        $rows = $locationIds->map(function ($locId) use ($viewsByLocation, $searchesByLocation, $publishedByLocation, $locations) {
+            $loc      = $locations->get($locId);
+            if (! $loc) return null;
+
+            $views      = (int) ($viewsByLocation[$locId] ?? 0);
+            $searches   = $searchesByLocation->get($locId);
+            $published  = $publishedByLocation->get($locId);
+
+            $searchCount      = $searches ? (int) $searches->searches_count : 0;
+            $zeroResults      = $searches ? (int) $searches->searches_zero_results : 0;
+            $publishedCount   = $published ? (int) $published->cnt : 0;
+            $avgPrice         = $published ? round((float) $published->avg_price, 0) : null;
+
+            $demandIndex          = min(100, round($searchCount * 0.6 + $views * 0.4, 1));
+            $attractiveness       = $avgPrice && $publishedCount > 0 ? min(100, round($views / max($publishedCount, 1) * 10, 1)) : 0;
+            $liquidity            = $publishedCount > 0 ? min(100, round($views / $publishedCount, 1)) : 0;
+            $searchGapIndex       = $searchCount > 0 ? round($zeroResults / $searchCount * 100, 1) : 0;
+
+            return (object) [
+                'id'                     => $loc->id,
+                'name'                   => $loc->name,
+                'slug'                   => $loc->slug,
+                'searches_count'         => $searchCount,
+                'searches_zero_results'  => $zeroResults,
+                'views_total'            => $views,
+                'properties_published'   => $publishedCount,
+                'avg_price'              => $avgPrice,
+                'demand_index'           => $demandIndex,
+                'attractiveness_score'   => $attractiveness,
+                'liquidity_index'        => $liquidity,
+                'search_gap_index'       => $searchGapIndex,
+            ];
+        })->filter()->sortByDesc('demand_index')->values()->take(20);
 
         return response()->json($rows);
     }

@@ -120,7 +120,7 @@ class AnalyticsController extends Controller
                 ->where('property_id', $id)
                 ->where('date', '>=', now()->subDays(30)->toDateString())
                 ->orderBy('date')
-                ->get(['date', 'views_total as views', 'views_unique']);
+                ->get(['date', 'views_total as views', 'views_unique as unique_views']);
         } else {
             $agg = DB::table('property_views')
                 ->where('property_id', $id)
@@ -139,7 +139,13 @@ class AnalyticsController extends Controller
                 ? round($contacts / $agg->unique_views * 100, 2)
                 : 0;
 
-            $periodStats = collect();
+            $periodStats = DB::table('property_views')
+                ->where('property_id', $id)
+                ->where('created_at', '>=', now()->subDays(30))
+                ->selectRaw('DATE(created_at) as date, COUNT(*) as views, COUNT(DISTINCT visitor_key) as unique_views')
+                ->groupBy(DB::raw('DATE(created_at)'))
+                ->orderBy('date')
+                ->get();
         }
 
         $avgDuration = DB::table('property_views')
@@ -159,6 +165,18 @@ class AnalyticsController extends Controller
             ->limit(3)
             ->get();
 
+        $topCitiesTn = DB::table('property_views')
+            ->where('property_id', $property->id)
+            ->where('created_at', '>=', $since30)
+            ->where('country', 'Tunisia')
+            ->whereNotNull('city_geo')
+            ->select('city_geo')
+            ->selectRaw('COUNT(*) as views')
+            ->groupBy('city_geo')
+            ->orderByDesc('views')
+            ->limit(5)
+            ->get();
+
         return response()->json([
             'total_views'          => (int) $agg->total_views,
             'unique_views'         => (int) $agg->unique_views,
@@ -167,6 +185,7 @@ class AnalyticsController extends Controller
             'period_stats'         => $periodStats,
             'avg_duration_seconds' => $avgDuration ? round($avgDuration, 1) : null,
             'top_countries'        => $topCountries,
+            'top_cities_tn'        => $topCitiesTn,
         ]);
     }
 
@@ -174,23 +193,38 @@ class AnalyticsController extends Controller
     {
         $request->user()->properties()->findOrFail($id);
 
-        $days    = (int) $request->query('days', 7);
-        $days    = in_array($days, [7, 30]) ? $days : 7;
-        $start   = now()->subDays($days - 1)->startOfDay();
+        $days  = (int) $request->query('days', 7);
+        $days  = in_array($days, [7, 30]) ? $days : 7;
+        $start = now()->subDays($days - 1)->startOfDay();
 
-        // Build a date series and left-join with aggregated stats
-        $rows = DB::table('property_stats_daily')
+        $hasAggregated = DB::table('property_stats_daily')
             ->where('property_id', $id)
             ->where('date', '>=', $start->toDateString())
-            ->orderBy('date')
-            ->get(['date', 'views_total as views', 'views_unique as unique_views'])
-            ->keyBy('date');
+            ->exists();
+
+        if ($hasAggregated) {
+            $rows = DB::table('property_stats_daily')
+                ->where('property_id', $id)
+                ->where('date', '>=', $start->toDateString())
+                ->orderBy('date')
+                ->get(['date', 'views_total as views', 'views_unique as unique_views'])
+                ->keyBy('date');
+        } else {
+            $rows = DB::table('property_views')
+                ->where('property_id', $id)
+                ->where('created_at', '>=', $start)
+                ->selectRaw('DATE(created_at) as date, COUNT(*) as views, COUNT(DISTINCT visitor_key) as unique_views')
+                ->groupBy(DB::raw('DATE(created_at)'))
+                ->orderBy('date')
+                ->get()
+                ->keyBy('date');
+        }
 
         $series = [];
         for ($i = 0; $i < $days; $i++) {
-            $date        = $start->copy()->addDays($i)->toDateString();
-            $row         = $rows->get($date);
-            $series[]    = [
+            $date     = $start->copy()->addDays($i)->toDateString();
+            $row      = $rows->get($date);
+            $series[] = [
                 'date'         => $date,
                 'views'        => $row ? (int) $row->views : 0,
                 'unique_views' => $row ? (int) $row->unique_views : 0,
@@ -248,6 +282,15 @@ class AnalyticsController extends Controller
             ->orderByDesc('total')
             ->first();
 
+        if (! $topRow) {
+            $topRow = DB::table('property_views')
+                ->whereIn('property_id', $propertyIds)
+                ->select('property_id', DB::raw('COUNT(*) as total'))
+                ->groupBy('property_id')
+                ->orderByDesc('total')
+                ->first();
+        }
+
         $topProperty = null;
         if ($topRow) {
             $prop = Property::find($topRow->property_id, ['id', 'title']);
@@ -273,6 +316,18 @@ class AnalyticsController extends Controller
             ->limit(3)
             ->get();
 
+        $topCitiesTn = DB::table('property_views')
+            ->whereIn('property_id', $propertyIds)
+            ->where('created_at', '>=', $since30)
+            ->where('country', 'Tunisia')
+            ->whereNotNull('city_geo')
+            ->select('city_geo')
+            ->selectRaw('COUNT(*) as views')
+            ->groupBy('city_geo')
+            ->orderByDesc('views')
+            ->limit(5)
+            ->get();
+
         return response()->json([
             'total_views'          => (int) $agg->total_views,
             'total_unique_views'   => (int) $agg->total_unique_views,
@@ -281,6 +336,7 @@ class AnalyticsController extends Controller
             'top_property'         => $topProperty,
             'avg_duration_seconds' => $avgDuration ? round($avgDuration, 1) : null,
             'top_countries'        => $topCountries,
+            'top_cities_tn'        => $topCitiesTn,
         ]);
     }
 

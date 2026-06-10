@@ -11,7 +11,7 @@ class PropertyController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $query = Property::with(['location', 'images' => fn ($q) => $q->where('is_cover', true), 'user:id,name,role,avatar'])
+        $query = Property::with(['location', 'images' => fn ($q) => $q->orderByRaw('is_cover DESC')->limit(4), 'user:id,name,role,avatar'])
             ->where('status', 'published');
 
         if ($request->filled('transaction_type')) {
