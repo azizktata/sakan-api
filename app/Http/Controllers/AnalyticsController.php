@@ -35,6 +35,20 @@ class AnalyticsController extends Controller
             $visitorKey = (string) Str::uuid();
         }
 
+        // Skip recording a view if the authenticated user owns this property
+        $authUser = $request->user();
+        if ($authUser) {
+            $ownerId = DB::table('properties')->where('id', $data['property_id'])->value('user_id');
+            if ($ownerId && $ownerId === $authUser->id) {
+                return response()->json([
+                    'tracked'     => false,
+                    'owner'       => true,
+                    'visitor_key' => $visitorKey,
+                    'view_id'     => null,
+                ], 200);
+            }
+        }
+
         $ua            = $request->userAgent() ?? '';
         $device        = $this->deriveDevice($ua);
         $sessionBucket = now()->format('Y-m-d H:00');

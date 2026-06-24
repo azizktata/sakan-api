@@ -243,22 +243,37 @@ class AdminAnalyticsController extends Controller
     {
         $since30 = now()->subDays(30)->startOfDay();
 
-        // Top 10 most common filter combinations (by location + transaction_type + property_type)
-        $topFilters = DB::table('searches')
+        // Total searches in period
+        $totalSearches = DB::table('searches')
             ->where('created_at', '>=', $since30)
-            ->selectRaw("JSON_UNQUOTE(JSON_EXTRACT(filters, '$.transaction_type')) as transaction_type")
-            ->selectRaw("JSON_UNQUOTE(JSON_EXTRACT(filters, '$.property_type')) as property_type")
-            ->selectRaw('location_id')
-            ->selectRaw('COUNT(*) as search_count')
-            ->selectRaw('SUM(CASE WHEN results_count = 0 THEN 1 ELSE 0 END) as zero_result_count')
-            ->groupBy('transaction_type', 'property_type', 'location_id')
-            ->orderByDesc('search_count')
-            ->limit(10)
-            ->get();
+            ->count();
 
-        // Zero-results searches by location (top 10 locations with most unmet demand)
-        $zeroResultsByLocation = DB::table('searches as s')
+        // Top 15 most common filter combinations (location + transaction_type + property_type)
+        // Join locations to resolve name immediately
+        $topFilters = DB::table('searches as s')
             ->leftJoin('locations as l', 's.location_id', '=', 'l.id')
+            ->where('s.created_at', '>=', $since30)
+            ->selectRaw("JSON_UNQUOTE(JSON_EXTRACT(s.filters, '$.transaction_type')) as transaction_type")
+            ->selectRaw("JSON_UNQUOTE(JSON_EXTRACT(s.filters, '$.property_type')) as property_type")
+            ->selectRaw('s.location_id')
+            ->selectRaw('l.name as location_name')
+            ->selectRaw('COUNT(*) as search_count')
+            ->selectRaw('SUM(CASE WHEN s.results_count = 0 THEN 1 ELSE 0 END) as zero_result_count')
+            ->groupBy('transaction_type', 'property_type', 's.location_id', 'l.name')
+            ->orderByDesc('search_count')
+            ->limit(15)
+            ->get()
+            ->map(function ($row) {
+                $row->zero_result_pct = $row->search_count > 0
+                    ? round($row->zero_result_count / $row->search_count * 100, 0)
+                    : 0;
+                return $row;
+            });
+
+        // Zero-results by location — only named locations (skip null = no city selected)
+        // Also include total searches for that city to compute failure rate
+        $zeroResultsByLocation = DB::table('searches as s')
+            ->join('locations as l', 's.location_id', '=', 'l.id')
             ->where('s.created_at', '>=', $since30)
             ->where('s.results_count', 0)
             ->select('l.id', 'l.name')
@@ -268,10 +283,62 @@ class AdminAnalyticsController extends Controller
             ->limit(10)
             ->get();
 
+        // For each zero-result city, get total searches to compute failure rate
+        $cityIds = $zeroResultsByLocation->pluck('id')->filter()->values();
+        $totalByCity = DB::table('searches')
+            ->where('created_at', '>=', $since30)
+            ->whereIn('location_id', $cityIds)
+            ->select('location_id')
+            ->selectRaw('COUNT(*) as total_searches')
+            ->groupBy('location_id')
+            ->pluck('total_searches', 'location_id');
+
+        $zeroResultsByLocation = $zeroResultsByLocation->map(function ($row) use ($totalByCity) {
+            $total = $totalByCity[$row->id] ?? $row->zero_result_searches;
+            $row->total_searches = (int) $total;
+            $row->failure_rate   = $total > 0
+                ? round($row->zero_result_searches / $total * 100, 0)
+                : 100;
+            return $row;
+        });
+
+        // Top property types searched (for summary insight)
+        $topTypes = DB::table('searches')
+            ->where('created_at', '>=', $since30)
+            ->selectRaw("JSON_UNQUOTE(JSON_EXTRACT(filters, '$.property_type')) as property_type")
+            ->selectRaw('COUNT(*) as search_count')
+            ->whereRaw("JSON_UNQUOTE(JSON_EXTRACT(filters, '$.property_type')) IS NOT NULL")
+            ->whereRaw("JSON_UNQUOTE(JSON_EXTRACT(filters, '$.property_type')) != 'null'")
+            ->groupBy('property_type')
+            ->orderByDesc('search_count')
+            ->limit(5)
+            ->get();
+
+        // Top cities searched (by search volume)
+        $topCities = DB::table('searches as s')
+            ->join('locations as l', 's.location_id', '=', 'l.id')
+            ->where('s.created_at', '>=', $since30)
+            ->select('l.id', 'l.name')
+            ->selectRaw('COUNT(*) as search_count')
+            ->selectRaw('SUM(CASE WHEN s.results_count = 0 THEN 1 ELSE 0 END) as zero_result_count')
+            ->groupBy('l.id', 'l.name')
+            ->orderByDesc('search_count')
+            ->limit(10)
+            ->get()
+            ->map(function ($row) {
+                $row->zero_result_pct = $row->search_count > 0
+                    ? round($row->zero_result_count / $row->search_count * 100, 0)
+                    : 0;
+                return $row;
+            });
+
         return response()->json([
-            'top_filters'             => $topFilters,
+            'top_filters'              => $topFilters,
             'zero_results_by_location' => $zeroResultsByLocation,
-            'period_days'             => 30,
+            'top_types'                => $topTypes,
+            'top_cities'               => $topCities,
+            'total_searches'           => $totalSearches,
+            'period_days'              => 30,
         ]);
     }
 

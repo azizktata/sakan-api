@@ -46,6 +46,9 @@ class PropertyController extends Controller
                 }
             }
         }
+        if ($request->filled('search')) {
+            $query->where('title', 'like', '%' . $request->search . '%');
+        }
 
         $perPage = min((int) ($request->per_page ?? 20), 500);
 
